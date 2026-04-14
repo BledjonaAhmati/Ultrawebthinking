@@ -1,0 +1,429 @@
+# ============================================
+# UltraThinking Monorepo - Docker Compose
+# Development Environment Configuration
+# ============================================
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  ultrathinking-network:
+    driver: bridge
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  mongodb_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  loki_data:
+    driver: local
+
+# ============================================
+# Services
+# ============================================
+services:
+
+  # ==========================================
+  # Infrastructure Services
+  # ==========================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ultrathinking-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ultrathinking}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ultrathinking_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-ultrathinking_dev}
+      POSTGRES_MULTIPLE_DATABASES: db_clisonix,db_booking,db_kloud
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/infra-docker/postgres/init-multi-db.sh:/docker-entrypoint-initdb.d/init-multi-db.sh
+    networks:
+      - ultrathinking-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ultrathinking}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ultrathinking-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_dev_password}
+    volumes:
+      - redis_data:/data
+    networks:
+      - ultrathinking-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:7-jammy
+    container_name: ultrathinking-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-mongo_dev_password}
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - ultrathinking-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web-dashboard:
+    image: node:24-alpine
+    container_name: web-dashboard
+    restart: unless-stopped
+    working_dir: /app
+    ports:
+      - "${WEB_DASHBOARD_PORT:-5173}:5173"
+    volumes:
+      - ./web/web-dashboard:/app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    networks:
+      - ultrathinking-network
+
+  # ==========================================
+  # Web Services - Python
+  # ==========================================
+
+  web-clisonix-main:
+    profiles: ["full"]
+    build:
+      context: ./web/web-clisonix-main
+      dockerfile: Dockerfile
+    container_name: web-clisonix-main
+    restart: unless-stopped
+    ports:
+      - "${WEB_CLISONIX_MAIN_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-ultrathinking}:${POSTGRES_PASSWORD:-ultrathinking_dev_password}@postgres:5432/db_clisonix
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_dev_password}@redis:6379/0
+      - ENVIRONMENT=development
+      - LOG_LEVEL=debug
+    volumes:
+      - ./web/web-clisonix-main:/app
+      - /app/venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ultrathinking-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web-ultrathinking:
+    profiles: ["full"]
+    build:
+      context: ./web/web-ultrathinking
+      dockerfile: Dockerfile
+    container_name: web-ultrathinking
+    restart: unless-stopped
+    ports:
+      - "${WEB_ULTRATHINKING_PORT:-8003}:8003"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-ultrathinking}:${POSTGRES_PASSWORD:-ultrathinking_dev_password}@postgres:5432/${POSTGRES_DB:-ultrathinking_dev}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_dev_password}@redis:6379/1
+      - ENVIRONMENT=development
+    volumes:
+      - ./web/web-ultrathinking:/app
+      - /app/venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ultrathinking-network
+
+  # ==========================================
+  # Web Services - Static HTML
+  # ==========================================
+
+  web-clisonix-blog:
+    profiles: ["full"]
+    image: nginx:alpine
+    container_name: web-clisonix-blog
+    restart: unless-stopped
+    ports:
+      - "${WEB_CLISONIX_BLOG_PORT:-8001}:80"
+    volumes:
+      - ./web/web-clisonix-blog:/usr/share/nginx/html:ro
+      - ./infra/infra-docker/nginx/blog.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - ultrathinking-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web-clisonix-news:
+    profiles: ["full"]
+    image: nginx:alpine
+    container_name: web-clisonix-news
+    restart: unless-stopped
+    ports:
+      - "${WEB_CLISONIX_NEWS_PORT:-8002}:80"
+    volumes:
+      - ./web/web-clisonix-news:/usr/share/nginx/html:ro
+      - ./infra/infra-docker/nginx/news.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - ultrathinking-network
+
+  # ==========================================
+  # Web Services - TypeScript/React
+  # ==========================================
+
+  web-ultrawebthinking:
+    profiles: ["full"]
+    build:
+      context: ./web/web-ultrawebthinking
+      dockerfile: Dockerfile
+    container_name: web-ultrawebthinking
+    restart: unless-stopped
+    ports:
+      - "${WEB_ULTRAWEBTHINKING_PORT:-8004}:8004"
+    environment:
+      - NODE_ENV=development
+      - VITE_API_URL=http://localhost:4000
+    volumes:
+      - ./web/web-ultrawebthinking:/app
+      - /app/node_modules
+    networks:
+      - ultrathinking-network
+    command: npm run dev
+
+  web-react-starter:
+    profiles: ["full"]
+    build:
+      context: ./web/web-react-starter
+      dockerfile: Dockerfile
+    container_name: web-react-starter
+    restart: unless-stopped
+    ports:
+      - "${WEB_REACT_STARTER_PORT:-8005}:8005"
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./web/web-react-starter:/app
+      - /app/node_modules
+    networks:
+      - ultrathinking-network
+    command: npm run dev
+
+  # ==========================================
+  # Applications - JavaScript/TypeScript
+  # ==========================================
+
+  app-starbooking:
+    profiles: ["full"]
+    build:
+      context: ./apps/app-starbooking
+      dockerfile: Dockerfile
+    container_name: app-starbooking
+    restart: unless-stopped
+    ports:
+      - "${APP_STARBOOKING_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-ultrathinking}:${POSTGRES_PASSWORD:-ultrathinking_dev_password}@postgres:5432/db_booking
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_dev_password}@redis:6379/2
+    volumes:
+      - ./apps/app-starbooking:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ultrathinking-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  app-harmonic:
+    profiles: ["full"]
+    build:
+      context: ./apps/app-harmonic
+      dockerfile: Dockerfile
+    container_name: app-harmonic
+    restart: unless-stopped
+    ports:
+      - "${APP_HARMONIC_PORT:-3001}:3001"
+    environment:
+      - NODE_ENV=development
+      - MONGODB_URL=mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-mongo_dev_password}@mongodb:27017/harmonic?authSource=admin
+    volumes:
+      - ./apps/app-harmonic:/app
+      - /app/node_modules
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - ultrathinking-network
+
+  app-cwy:
+    profiles: ["full"]
+    build:
+      context: ./apps/app-cwy
+      dockerfile: Dockerfile
+    container_name: app-cwy
+    restart: unless-stopped
+    ports:
+      - "${APP_CWY_PORT:-3002}:3002"
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./apps/app-cwy:/app
+      - /app/node_modules
+    networks:
+      - ultrathinking-network
+
+  app-aba-gmbh:
+    profiles: ["full"]
+    image: nginx:alpine
+    container_name: app-aba-gmbh
+    restart: unless-stopped
+    ports:
+      - "${APP_ABA_PORT:-3003}:80"
+    volumes:
+      - ./apps/app-aba-gmbh:/usr/share/nginx/html:ro
+    networks:
+      - ultrathinking-network
+
+  # ==========================================
+  # Backend Services
+  # ==========================================
+
+  service-clisonix-cloud:
+    profiles: ["full"]
+    build:
+      context: ./services/service-clisonix-cloud
+      dockerfile: Dockerfile
+    container_name: service-clisonix-cloud
+    restart: unless-stopped
+    ports:
+      - "${SERVICE_CLISONIX_CLOUD_PORT:-5000}:5000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-ultrathinking}:${POSTGRES_PASSWORD:-ultrathinking_dev_password}@postgres:5432/db_clisonix
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_dev_password}@redis:6379/3
+      - ENVIRONMENT=development
+    volumes:
+      - ./services/service-clisonix-cloud:/app
+      - /app/venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ultrathinking-network
+
+  service-clisonic-cloud:
+    profiles: ["full"]
+    build:
+      context: ./services/service-clisonic-cloud
+      dockerfile: Dockerfile
+    container_name: service-clisonic-cloud
+    restart: unless-stopped
+    ports:
+      - "${SERVICE_CLISONIC_CLOUD_PORT:-5001}:5001"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-ultrathinking}:${POSTGRES_PASSWORD:-ultrathinking_dev_password}@postgres:5432/db_clisonix
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_dev_password}@redis:6379/4
+    volumes:
+      - ./services/service-clisonic-cloud:/app
+      - /app/venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ultrathinking-network
+
+  service-kloud-hardware:
+    profiles: ["full"]
+    build:
+      context: ./services/service-kloud-hardware
+      dockerfile: Dockerfile
+    container_name: service-kloud-hardware
+    restart: unless-stopped
+    ports:
+      - "${SERVICE_KLOUD_PORT:-6000}:6000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-ultrathinking}:${POSTGRES_PASSWORD:-ultrathinking_dev_password}@postgres:5432/db_kloud
+      - RUST_LOG=debug
+    volumes:
+      - ./services/service-kloud-hardware:/app
+      - /app/target
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ultrathinking-network
+
+  # ==========================================
+  # Monitoring & Observability (Optional)
+  # ==========================================
+
+  # Uncomment for production-like monitoring
+
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: ultrathinking-prometheus
+  #   restart: unless-stopped
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./infra/infra-docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+  #   networks:
+  #     - ultrathinking-network
+
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: ultrathinking-grafana
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3100:3000"
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #   networks:
+  #     - ultrathinking-network
+  #   depends_on:
+  #     - prometheus

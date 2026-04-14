@@ -1,0 +1,19 @@
+# Cwy Nin Engine Dependencies
+# Attribution: Alba (Architecture), Albi (AI), Sofia (Emotional Intelligence)
+
+# Core Framework
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+pydantic==2.6.1
+
+# HTTP Client
+aiohttp==3.9.3
+
+# Logging
+loguru==0.7.2
+
+# Utilities
+python-dateutil==2.8.2
+
+# Type Hints
+typing-extensions==4.9.0

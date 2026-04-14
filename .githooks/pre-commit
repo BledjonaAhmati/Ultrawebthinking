@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+
+echo "[pre-commit] Running No Fake Data guard..."
+npm run --silent guard:no-fake
+echo "[pre-commit] PASS"

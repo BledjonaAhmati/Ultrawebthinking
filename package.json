@@ -1,0 +1,58 @@
+{
+  "name": "ultrathinking-monorepo",
+  "version": "1.0.0",
+  "description": "Enterprise-grade microservices monorepo - UltraThinking Platform",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "web/*",
+    "libs/*"
+  ],
+  "scripts": {
+    "guard:no-fake": "python scripts/no_fake_data_guard.py",
+    "hooks:install": "powershell -ExecutionPolicy Bypass -File scripts/install-git-hooks.ps1",
+    "dev": "docker-compose up",
+    "dev:build": "docker-compose up --build",
+    "down": "docker-compose down",
+    "clean": "docker-compose down -v",
+    "install:all": "npm install && npm run install:apps && npm run install:web",
+    "install:apps": "npm install --workspace=apps/app-starbooking --workspace=apps/app-harmonic --workspace=apps/app-cwy",
+    "install:web": "npm install --workspace=web/web-ultrawebthinking --workspace=web/web-react-starter",
+    "build:all": "npm run build:apps && npm run build:web",
+    "build:apps": "npm run build --workspaces --if-present",
+    "build:web": "npm run build --workspace=web/web-ultrawebthinking --workspace=web/web-react-starter",
+    "test": "npm run test --workspaces --if-present",
+    "test:coverage": "npm run test:coverage --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "lint:fix": "npm run lint:fix --workspaces --if-present",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "docker:build": "docker-compose build",
+    "docker:push": "docker-compose push",
+    "logs": "docker-compose logs -f",
+    "ps": "docker-compose ps",
+    "restart": "docker-compose restart"
+  },
+  "devDependencies": {
+    "prettier": "^3.2.5",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Web8kameleon-hub/ultrathinking-monorepo.git"
+  },
+  "keywords": [
+    "monorepo",
+    "microservices",
+    "docker",
+    "kubernetes",
+    "enterprise"
+  ],
+  "author": "Clisonix AI <clisonix@ai.dev>",
+  "license": "MIT"
+}

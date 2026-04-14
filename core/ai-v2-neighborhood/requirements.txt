@@ -1,0 +1,32 @@
+# ============================================
+# AI V2 Neighborhood - Requirements
+# ============================================
+
+# Core ML
+torch==2.2.0
+onnxruntime==1.17.0
+onnxruntime-gpu==1.17.0  # Optional
+
+# HuggingFace
+transformers==4.38.0
+
+# Model Management
+mlflow==2.10.2
+
+# Web Framework
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+pydantic==2.6.1
+
+# Database
+psycopg2-binary==2.9.9
+pymongo==4.6.1
+
+# Async
+aiohttp==3.9.3
+
+# Logging
+loguru==0.7.2
+
+# Utilities
+numpy>=1.24.0

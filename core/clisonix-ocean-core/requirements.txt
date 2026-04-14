@@ -1,0 +1,31 @@
+# ============================================
+# Clisonix Ocean Core - Requirements
+# ============================================
+
+# Core ML/AI
+torch==2.2.0
+transformers==4.38.0
+numpy>=1.24.0
+scipy>=1.12.0
+
+# Knowledge Graph
+neo4j==5.17.0
+
+# Web Framework
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+pydantic==2.6.1
+
+# Async & Networking
+aiohttp==3.9.3
+httpx==0.26.0
+
+# Logging
+loguru==0.7.2
+
+# Date/Time
+python-dateutil==2.8.2
+
+# CUDA support (optional)
+# nvidia-cuda-runtime-cu12==12.1.105
+# nvidia-cudnn-cu12==8.9.7.29

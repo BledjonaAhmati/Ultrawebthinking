@@ -1,0 +1,372 @@
+name: 🚀 CI/CD Pipeline - UltraThinking Monorepo
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - feature/*
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  NODE_VERSION: '24.x'
+  PYTHON_VERSION: '3.14'
+  RUST_VERSION: 'stable'
+
+jobs:
+  # ============================================
+  # Detect Changed Services
+  # ============================================
+  detect-changes:
+    name: 🔍 Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.filter.outputs.apps }}
+      web: ${{ steps.filter.outputs.web }}
+      services: ${{ steps.filter.outputs.services }}
+      libs: ${{ steps.filter.outputs.libs }}
+      infra: ${{ steps.filter.outputs.infra }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Check file changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            apps:
+              - 'apps/**'
+            web:
+              - 'web/**'
+            services:
+              - 'services/**'
+            libs:
+              - 'libs/**'
+            infra:
+              - 'infra/**'
+              - 'docker-compose.yml'
+              - '.github/workflows/**'
+
+  # ============================================
+  # No Fake Data Gate
+  # ============================================
+  no-fake-data-gate:
+    name: 🚫 No Fake Data Gate
+    runs-on: ubuntu-latest
+    needs: detect-changes
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Enforce no-fake-data policy
+        run: python scripts/no_fake_data_guard.py
+
+  # ============================================
+  # Lint & Format
+  # ============================================
+  lint:
+    name: 🧹 Lint & Format
+    runs-on: ubuntu-latest
+    needs: [detect-changes, no-fake-data-gate]
+    if: |
+      needs.detect-changes.outputs.apps == 'true' ||
+      needs.detect-changes.outputs.web == 'true' ||
+      needs.detect-changes.outputs.services == 'true'
+    
+    strategy:
+      matrix:
+        check:
+          - name: JavaScript/TypeScript
+            path: apps
+            run: npm run lint
+          - name: Python
+            path: web
+            run: flake8 . && black --check .
+          - name: Rust
+            path: services/service-kloud-hardware
+            run: cargo fmt --check && cargo clippy -- -D warnings
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        if: matrix.check.name == 'JavaScript/TypeScript'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Setup Python
+        if: matrix.check.name == 'Python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Setup Rust
+        if: matrix.check.name == 'Rust'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      
+      - name: Install dependencies & Lint
+        working-directory: ${{ matrix.check.path }}
+        run: ${{ matrix.check.run }}
+
+  # ============================================
+  # Test - JavaScript/TypeScript Apps
+  # ============================================
+  test-apps:
+    name: 🧪 Test Apps
+    runs-on: ubuntu-latest
+    needs: [detect-changes, lint]
+    if: needs.detect-changes.outputs.apps == 'true'
+    
+    strategy:
+      matrix:
+        app:
+          - app-starbooking
+          - app-harmonic
+          - app-cwy
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: apps/${{ matrix.app }}
+        run: npm ci
+      
+      - name: Run tests
+        working-directory: apps/${{ matrix.app }}
+        run: npm test -- --coverage
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: apps/${{ matrix.app }}/coverage/coverage-final.json
+          flags: ${{ matrix.app }}
+
+  # ============================================
+  # Test - Python Web Services
+  # ============================================
+  test-web:
+    name: 🧪 Test Web Services
+    runs-on: ubuntu-latest
+    needs: [detect-changes, lint]
+    if: needs.detect-changes.outputs.web == 'true'
+    
+    strategy:
+      matrix:
+        service:
+          - web-clisonix-main
+          - web-ultrathinking
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        working-directory: web/${{ matrix.service }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+      
+      - name: Run tests
+        working-directory: web/${{ matrix.service }}
+        run: pytest --cov=. --cov-report=xml
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: web/${{ matrix.service }}/coverage.xml
+          flags: ${{ matrix.service }}
+
+  # ============================================
+  # Test - Rust Services
+  # ============================================
+  test-services:
+    name: 🧪 Test Backend Services
+    runs-on: ubuntu-latest
+    needs: [detect-changes, lint]
+    if: needs.detect-changes.outputs.services == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      
+      - name: Run Rust tests
+        working-directory: services/service-kloud-hardware
+        run: cargo test --verbose
+
+  # ============================================
+  # Build Docker Images
+  # ============================================
+  build:
+    name: 🐳 Build Docker Images
+    runs-on: ubuntu-latest
+    needs: [test-apps, test-web, test-services]
+    if: |
+      always() &&
+      (needs.test-apps.result == 'success' || needs.test-apps.result == 'skipped') &&
+      (needs.test-web.result == 'success' || needs.test-web.result == 'skipped') &&
+      (needs.test-services.result == 'success' || needs.test-services.result == 'skipped')
+    
+    strategy:
+      matrix:
+        include:
+          - service: app-starbooking
+            path: apps/app-starbooking
+          - service: web-clisonix-main
+            path: web/web-clisonix-main
+          - service: service-kloud-hardware
+            path: services/service-kloud-hardware
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha,prefix={{branch}}-
+      
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.path }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================
+  # Deploy to Staging
+  # ============================================
+  deploy-staging:
+    name: 🚀 Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    environment:
+      name: staging
+      url: https://staging.ultrathinking.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Deploy to staging
+        run: |
+          echo "Deploying to staging environment..."
+          # Add your deployment script here
+          # Example: kubectl apply -f infra/infra-k8s/staging/
+
+  # ============================================
+  # Deploy to Production
+  # ============================================
+  deploy-production:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: https://ultrathinking.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Deploy to production
+        run: |
+          echo "Deploying to production environment..."
+          # Add your deployment script here
+          # Example: kubectl apply -f infra/infra-k8s/production/
+
+  # ============================================
+  # Security Scan
+  # ============================================
+  security:
+    name: 🔒 Security Scan
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ============================================
+  # Notify on Success/Failure
+  # ============================================
+  notify:
+    name: 📢 Notify
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always()
+    
+    steps:
+      - name: Send notification
+        run: |
+          echo "Pipeline completed with status: ${{ job.status }}"
+          # Add notification logic (Slack, Discord, Email, etc.)
